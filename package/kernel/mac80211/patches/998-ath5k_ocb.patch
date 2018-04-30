@@ -1,0 +1,174 @@
+Author: Florian Klingler <klingler@ccs-labs.org>
+Date:   Thu Mar 30 16:32:13 2017 +0200
+
+    OCB Mode for ath5k - initial version
+
+--- a/drivers/net/wireless/ath/ath5k/base.c
++++ b/drivers/net/wireless/ath/ath5k/base.c
+@@ -287,6 +287,8 @@ static bool ath5k_is_standard_channel(short chan, enum nl80211_band band)
+ 		((chan & 3) == 1 && chan >= 149 && chan <= 165) ||
+ 		/* 802.11j 5.030-5.080 GHz (20MHz) */
+ 		(chan == 8 || chan == 12 || chan == 16) ||
++		/* 802.11p (10MHz) */
++		(chan == 172) || (chan == 174) || (chan == 176) || (chan == 178) || (chan == 180) || (chan == 182) || (chan == 184) ||
+ 		/* 802.11j 4.9GHz (20MHz) */
+ 		(chan == 184 || chan == 188 || chan == 192 || chan == 196));
+ }
+@@ -1065,6 +1067,13 @@ static enum ath5k_pkt_type get_hw_packet_type(struct sk_buff *skb)
+ 		qi.tqi_aifs = 0;
+ 		qi.tqi_cw_min = 0;
+ 		qi.tqi_cw_max = 2 * AR5K_TUNE_CWMIN;
++	} else if (ah->opmode == NL80211_IFTYPE_OCB) {
++		/*
++		 * Adhoc mode; backoff between 0 and (2 * cw_min).
++		 */
++		qi.tqi_aifs = 0;
++		qi.tqi_cw_min = 0;
++		qi.tqi_cw_max = 2 * AR5K_TUNE_CWMIN;
+ 	}
+ 
+ 	ATH5K_DBG(ah, ATH5K_DEBUG_BEACON,
+@@ -1433,7 +1442,7 @@ static int ath5k_remove_padding(struct sk_buff *skb)
+ 		ewma_beacon_rssi_add(&ah->ah_beacon_rssi_avg, rs->rs_rssi);
+ 
+ 		/* check beacons in IBSS mode */
+-		if (ah->opmode == NL80211_IFTYPE_ADHOC)
++		if (ah->opmode == NL80211_IFTYPE_ADHOC || ah->opmode == NL80211_IFTYPE_OCB)
+ 			ath5k_check_ibss_tsf(ah, skb, rxs);
+ 	}
+ 
+@@ -1834,7 +1843,7 @@ static int ath5k_remove_padding(struct sk_buff *skb)
+ 	antenna = ah->ah_tx_ant;
+ 
+ 	flags = AR5K_TXDESC_NOACK;
+-	if (ah->opmode == NL80211_IFTYPE_ADHOC && ath5k_hw_hasveol(ah)) {
++	if ((ah->opmode == NL80211_IFTYPE_ADHOC || ah->opmode == NL80211_IFTYPE_OCB) && ath5k_hw_hasveol(ah)) {
+ 		ds->ds_link = bf->daddr;	/* self-linked */
+ 		flags |= AR5K_TXDESC_VEOL;
+ 	} else
+@@ -2164,7 +2173,7 @@ static int ath5k_remove_padding(struct sk_buff *skb)
+ 
+ 		ah->imask |= AR5K_INT_SWBA;
+ 
+-		if (ah->opmode == NL80211_IFTYPE_ADHOC) {
++		if (ah->opmode == NL80211_IFTYPE_ADHOC || ah->opmode == NL80211_IFTYPE_OCB) {
+ 			if (ath5k_hw_hasveol(ah))
+ 				ath5k_beacon_send(ah);
+ 		} else
+@@ -2190,7 +2199,7 @@ static void ath5k_tasklet_beacon(unsigned long data)
+ 	 * transmission time) in order to detect whether
+ 	 * automatic TSF updates happened.
+ 	 */
+-	if (ah->opmode == NL80211_IFTYPE_ADHOC) {
++	if (ah->opmode == NL80211_IFTYPE_ADHOC || ah->opmode == NL80211_IFTYPE_OCB) {
+ 		/* XXX: only if VEOL supported */
+ 		u64 tsf = ath5k_hw_get_tsf64(ah);
+ 		ah->nexttbtt += ah->bintval;
+@@ -2548,7 +2557,8 @@ static void ath5k_tasklet_beacon(unsigned long data)
+ 		BIT(NL80211_IFTYPE_AP) |
+ 		BIT(NL80211_IFTYPE_STATION) |
+ 		BIT(NL80211_IFTYPE_ADHOC) |
+-		BIT(NL80211_IFTYPE_MESH_POINT);
++		BIT(NL80211_IFTYPE_MESH_POINT) |
++		BIT(NL80211_IFTYPE_OCB);
+ 
+ 	hw->wiphy->iface_combinations = &if_comb;
+ 	hw->wiphy->n_iface_combinations = 1;
+
+--- a/drivers/net/wireless/ath/ath5k/mac80211-ops.c
++++ b/drivers/net/wireless/ath/ath5k/mac80211-ops.c
+@@ -80,7 +80,8 @@
+ 	mutex_lock(&ah->lock);
+ 
+ 	if ((vif->type == NL80211_IFTYPE_AP ||
+-	     vif->type == NL80211_IFTYPE_ADHOC)
++	     vif->type == NL80211_IFTYPE_ADHOC ||
++		 vif->type == NL80211_IFTYPE_OCB)
+ 	    && (ah->num_ap_vifs + ah->num_adhoc_vifs) >= ATH_BCBUF) {
+ 		ret = -ELNRNG;
+ 		goto end;
+@@ -103,6 +105,7 @@
+ 	case NL80211_IFTYPE_STATION:
+ 	case NL80211_IFTYPE_ADHOC:
+ 	case NL80211_IFTYPE_MESH_POINT:
++	case NL80211_IFTYPE_OCB:
+ 		avf->opmode = vif->type;
+ 		break;
+ 	default:
+@@ -116,7 +119,8 @@
+ 	/* Assign the vap/adhoc to a beacon xmit slot. */
+ 	if ((avf->opmode == NL80211_IFTYPE_AP) ||
+ 	    (avf->opmode == NL80211_IFTYPE_ADHOC) ||
+-	    (avf->opmode == NL80211_IFTYPE_MESH_POINT)) {
++	    (avf->opmode == NL80211_IFTYPE_MESH_POINT) ||
++		(avf->opmode == NL80211_IFTYPE_OCB)) {
+ 		int slot;
+ 
+ 		WARN_ON(list_empty(&ah->bcbuf));
+@@ -139,6 +143,8 @@
+ 			ah->num_adhoc_vifs++;
+ 		else if (avf->opmode == NL80211_IFTYPE_MESH_POINT)
+ 			ah->num_mesh_vifs++;
++		else if (avf->opmode == NL80211_IFTYPE_OCB)
++			ah->num_mesh_vifs++;
+ 	}
+ 
+ 	/* Any MAC address is fine, all others are included through the
+@@ -182,6 +188,8 @@
+ 		ah->num_adhoc_vifs--;
+ 	else if (avf->opmode == NL80211_IFTYPE_MESH_POINT)
+ 		ah->num_mesh_vifs--;
++	else if (avf->opmode == NL80211_IFTYPE_OCB)
++		ah->num_mesh_vifs--;
+ 
+ 	ath5k_update_bssid_mask_and_opmode(ah, NULL);
+ 	mutex_unlock(&ah->lock);
+@@ -431,6 +439,10 @@
+ 		rfilt |= AR5K_RX_FILTER_PROBEREQ |
+ 			 AR5K_RX_FILTER_BEACON;
+ 		break;
++	case NL80211_IFTYPE_OCB:
++		rfilt |= AR5K_RX_FILTER_PROBEREQ |
++			 AR5K_RX_FILTER_BEACON;
++		break;
+ 	case NL80211_IFTYPE_STATION:
+ 		if (ah->assoc)
+ 			rfilt |= AR5K_RX_FILTER_BEACON;
+@@ -638,7 +650,7 @@
+ 	 * in IBSS mode we need to update the beacon timers too.
+ 	 * this will also reset the TSF if we call it with 0
+ 	 */
+-	if (ah->opmode == NL80211_IFTYPE_ADHOC)
++	if (ah->opmode == NL80211_IFTYPE_ADHOC || ah->opmode == NL80211_IFTYPE_OCB)
+ 		ath5k_beacon_update_timers(ah, 0);
+ 	else
+ 		ath5k_hw_reset_tsf(ah);
+
+--- a/drivers/net/wireless/ath/ath5k/pcu.c
++++ b/drivers/net/wireless/ath/ath5k/pcu.c
+@@ -670,6 +670,8 @@
+ 		break;
+ 	case NL80211_IFTYPE_ADHOC:
+ 		AR5K_REG_ENABLE_BITS(ah, AR5K_TXCFG, AR5K_TXCFG_ADHOC_BCN_ATIM);
++	case NL80211_IFTYPE_OCB:
++		AR5K_REG_ENABLE_BITS(ah, AR5K_TXCFG, AR5K_TXCFG_ADHOC_BCN_ATIM);
+ 	default:
+ 		/* On non-STA modes timer1 is used as next DMA
+ 		 * beacon alert (DBA) timer and timer2 as next
+@@ -898,6 +900,15 @@
+ 			AR5K_REG_ENABLE_BITS(ah, AR5K_CFG, AR5K_CFG_IBSS);
+ 		break;
+ 
++	case NL80211_IFTYPE_OCB:
++		pcu_reg |= AR5K_STA_ID1_ADHOC | AR5K_STA_ID1_KEYSRCH_MODE;
++		beacon_reg |= AR5K_BCR_ADHOC;
++		if (ah->ah_version == AR5K_AR5210)
++			pcu_reg |= AR5K_STA_ID1_NO_PSPOLL;
++		else
++			AR5K_REG_ENABLE_BITS(ah, AR5K_CFG, AR5K_CFG_IBSS);
++		break;
++
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_MESH_POINT:
+ 		pcu_reg |= AR5K_STA_ID1_AP | AR5K_STA_ID1_KEYSRCH_MODE;
+

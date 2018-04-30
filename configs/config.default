@@ -1,0 +1,12 @@
+CONFIG_USE_LIBSTDCXX=y
+CONFIG_DEFAULT_firewall=n
+CONFIG_PACKAGE_firewall=n
+CONFIG_PACKAGE_kmod-pcnet32=y
+CONFIG_PACKAGE_uhttpd=y 
+CONFIG_PACKAGE_uhttpd-mod-ubus=y 
+CONFIG_PACKAGE_luci-mod-admin-full=y
+CONFIG_PACKAGE_libiwinfo-lua=y
+CONFIG_PACKAGE_luci-app-openc2x=y
+CONFIG_PACKAGE_luci-theme-material=y
+CONFIG_PACKAGE_openc2x=y
+CONFIG_PACKAGE_kmod-usb-serial-ch341=y
