@@ -3,4 +3,4 @@ src-git luci https://git.lede-project.org/project/luci.git^d3f0685d63c1291359dc5
 src-git routing https://git.lede-project.org/feed/routing.git^d11075cd40a88602bf4ba2b275f72100ddcb4767
 src-git telephony https://git.lede-project.org/feed/telephony.git^ac6415e61f147a6892fd2785337aec93ddc68fa9
 #src-git openc2x https://gitlab.uni.lu/ehamzic/openc2x_feed^21c637c9889a10ef0a25e32d315a649b00398e06
-src-git openc2x https://gitlab.uni.lu/ehamzic/openc2x_feed^b60f86fd2d2d3ac1c1b7c22832dc716de6f6a109
+src-git openc2x https://gitlab.uni.lu/ehamzic/openc2x_feed^b688630eebc8b3b42a75aef12268676bda36b2f3
